@@ -12,6 +12,7 @@ import gymsRouter from './routes/gyms';
 import classesRouter from './routes/classes';
 import bookingsRouter from './routes/bookings';
 import paymentsRouter from './routes/payments';
+import subscriptionsRouter from './routes/subscriptions';
 
 dotenv.config();
 
@@ -49,6 +50,7 @@ app.use('/api/gyms', gymsRouter);
 app.use('/api/classes', classesRouter);
 app.use('/api/bookings', bookingsRouter);
 app.use('/api/payments', paymentsRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
 
 // Health check
 app.get('/health', (req, res) => {

@@ -1,23 +1,17 @@
 import { Router } from 'express';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { payments } from '../db/schema';
+import { payments, subscriptionPayments, subscriptions } from '../db/schema';
 import { db } from '../db';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import MercadoPago, { MercadoPagoConfig } from 'mercadopago';
+import mercadopago from 'mercadopago';
 
 const router = Router();
 
 // Configurar MercadoPago
-const client = new MercadoPagoConfig({
-  accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN || '',
-  options: {
-    timeout: 5000,
-    idempotencyKey: 'abc'
-  }
+mercadopago.configure({
+  access_token: process.env.MERCADOPAGO_ACCESS_TOKEN || '',
 });
-
-const mercadopago = new MercadoPago(client);
 
 // Schema de validación
 const createPaymentSchema = z.object({
@@ -71,7 +65,7 @@ router.post('/create-preference', authenticateToken, async (req: AuthRequest, re
         auto_return: 'approved'
       };
 
-      const mpResponse = await mercadopago.preferences.create({ body: preference });
+      const mpResponse = await mercadopago.preferences.create(preference);
 
       res.status(201).json({
         payment: newPayment[0],
@@ -104,44 +98,222 @@ router.post('/create-preference', authenticateToken, async (req: AuthRequest, re
 // Webhook de MercadoPago
 router.post('/webhook', async (req, res) => {
   try {
-    const { type, data } = req.body;
-    console.log('Webhook received:', { type, data });
+    const { type, data, action, date_created, id: webhookId } = req.body;
+    
+    // Log detallado del webhook recibido
+    console.log('MercadoPago Webhook received:', {
+      type,
+      action,
+      data,
+      date_created,
+      webhookId,
+      timestamp: new Date().toISOString()
+    });
 
-    if (type === 'payment') {
-      const paymentId = data.id;
-      
-      try {
-        // Verificar el pago con MercadoPago API
-        const mpPayment = await mercadopago.payment.get({ id: paymentId });
-        
-        if (mpPayment && mpPayment.external_reference) {
-          // Actualizar estado en nuestra base de datos
-          const externalReference = mpPayment.external_reference;
-          const status = mapMercadoPagoStatus(mpPayment.status || 'pending');
-          
-          await db.update(payments)
-            .set({ 
-              status,
-              mercadopagoId: paymentId.toString(),
-              updatedAt: new Date()
-            })
-            .where(eq(payments.id, parseInt(externalReference)));
-
-          console.log(`Payment ${externalReference} updated to status: ${status}`);
-        }
-
-      } catch (mpError) {
-        console.error('Error fetching payment from MercadoPago:', mpError);
-        // Continuar procesando otros webhooks aunque este falle
-      }
+    // Validar estructura del webhook
+    if (!type || !data || !data.id) {
+      console.warn('Invalid webhook structure received:', req.body);
+      return res.status(400).json({ error: 'Invalid webhook structure' });
     }
 
-    res.status(200).json({ received: true });
+    // Procesar diferentes tipos de notificaciones
+    switch (type) {
+      case 'payment':
+        await processPaymentWebhook(data.id, action);
+        break;
+      
+      case 'subscription':
+        await processSubscriptionWebhook(data.id, action);
+        break;
+      
+      case 'preapproval':
+        await processPreapprovalWebhook(data.id, action);
+        break;
+      
+      default:
+        console.log(`Unhandled webhook type: ${type}`);
+    }
+
+    res.status(200).json({ received: true, processed: true });
+    
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Webhook processing error:', error);
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 });
+
+// Procesar webhook de pagos
+async function processPaymentWebhook(paymentId: string, action: string) {
+  try {
+    console.log(`Processing payment webhook: ${paymentId}, action: ${action}`);
+    
+    // Verificar el pago con MercadoPago API
+    const mpPayment = await mercadopago.payment.findById(paymentId);
+    
+    if (!mpPayment || !mpPayment.external_reference) {
+      console.warn(`Payment ${paymentId} not found or missing external_reference`);
+      return;
+    }
+
+    const externalReference = mpPayment.external_reference;
+    const newStatus = mapMercadoPagoStatus(mpPayment.status || 'pending');
+    
+    // Primero verificar si es un pago de suscripción
+    const existingSubscriptionPayment = await db.select()
+      .from(subscriptionPayments)
+      .where(eq(subscriptionPayments.id, parseInt(externalReference)))
+      .limit(1);
+
+    if (existingSubscriptionPayment.length) {
+      await processSubscriptionPaymentWebhook(existingSubscriptionPayment[0], newStatus, mpPayment, action);
+      return;
+    }
+    
+    // Si no es un pago de suscripción, verificar pagos regulares
+    const existingPayment = await db.select()
+      .from(payments)
+      .where(eq(payments.id, parseInt(externalReference)))
+      .limit(1);
+
+    if (!existingPayment.length) {
+      console.warn(`Payment with external_reference ${externalReference} not found in database`);
+      return;
+    }
+
+    const currentPayment = existingPayment[0];
+    
+    // Solo actualizar si el estado ha cambiado
+    if (currentPayment.status !== newStatus) {
+      await db.update(payments)
+        .set({ 
+          status: newStatus,
+          mercadopagoId: paymentId.toString(),
+          paymentDate: mpPayment.date_approved ? new Date(mpPayment.date_approved) : null,
+          updatedAt: new Date(),
+          metadata: JSON.stringify({
+            ...JSON.parse(currentPayment.metadata || '{}'),
+            mercadopago_status: mpPayment.status,
+            mercadopago_status_detail: mpPayment.status_detail,
+            payment_method_id: mpPayment.payment_method_id,
+            payment_type_id: mpPayment.payment_type_id,
+            last_webhook_action: action,
+            last_webhook_date: new Date().toISOString()
+          })
+        })
+        .where(eq(payments.id, parseInt(externalReference)));
+
+      console.log(`Payment ${externalReference} updated from ${currentPayment.status} to ${newStatus}`);
+      
+      // Si el pago fue aprobado, ejecutar lógica de negocio adicional
+      if (newStatus === 'approved' && currentPayment.status !== 'approved') {
+        await handlePaymentApproved(currentPayment);
+      }
+    } else {
+      console.log(`Payment ${externalReference} status unchanged: ${newStatus}`);
+    }
+
+  } catch (error) {
+    console.error(`Error processing payment webhook ${paymentId}:`, error);
+    throw error;
+  }
+}
+
+// Procesar webhook de pagos de suscripción
+async function processSubscriptionPaymentWebhook(subscriptionPayment: any, newStatus: string, mpPayment: any, action: string) {
+  try {
+    console.log(`Processing subscription payment webhook: ${subscriptionPayment.id}, status: ${newStatus}`);
+    
+    // Solo actualizar si el estado ha cambiado
+    if (subscriptionPayment.status !== newStatus) {
+      await db.update(subscriptionPayments)
+        .set({ 
+          status: newStatus,
+          mercadopagoId: mpPayment.id.toString(),
+          paidAt: mpPayment.date_approved ? Math.floor(new Date(mpPayment.date_approved).getTime() / 1000) : null,
+          updatedAt: new Date(),
+          metadata: JSON.stringify({
+            ...JSON.parse(subscriptionPayment.metadata || '{}'),
+            mercadopago_status: mpPayment.status,
+            mercadopago_status_detail: mpPayment.status_detail,
+            payment_method_id: mpPayment.payment_method_id,
+            payment_type_id: mpPayment.payment_type_id,
+            last_webhook_action: action,
+            last_webhook_date: new Date().toISOString()
+          })
+        })
+        .where(eq(subscriptionPayments.id, subscriptionPayment.id));
+
+      console.log(`Subscription payment ${subscriptionPayment.id} updated from ${subscriptionPayment.status} to ${newStatus}`);
+      
+      // Si el pago fue aprobado, activar la suscripción
+      if (newStatus === 'approved' && subscriptionPayment.status !== 'approved') {
+        await handleSubscriptionPaymentApproved(subscriptionPayment);
+      }
+    } else {
+      console.log(`Subscription payment ${subscriptionPayment.id} status unchanged: ${newStatus}`);
+    }
+
+  } catch (error) {
+    console.error(`Error processing subscription payment webhook:`, error);
+    throw error;
+  }
+}
+
+// Manejar cuando un pago de suscripción es aprobado
+async function handleSubscriptionPaymentApproved(subscriptionPayment: any) {
+  try {
+    console.log(`Activating subscription for payment ${subscriptionPayment.id}`);
+    
+    // Activar la suscripción correspondiente
+    await db.update(subscriptions)
+      .set({
+        status: 'active',
+        updatedAt: new Date()
+      })
+      .where(eq(subscriptions.id, subscriptionPayment.subscriptionId));
+
+    console.log(`Subscription ${subscriptionPayment.subscriptionId} activated successfully`);
+    
+    // Aquí puedes agregar lógica adicional:
+    // - Enviar email de bienvenida
+    // - Configurar próximo cobro automático
+    // - Actualizar métricas
+    
+  } catch (error) {
+    console.error('Error activating subscription:', error);
+  }
+}
+
+// Procesar webhook de suscripciones (para implementar más adelante)
+async function processSubscriptionWebhook(subscriptionId: string, action: string) {
+  console.log(`Subscription webhook received: ${subscriptionId}, action: ${action}`);
+  // TODO: Implementar lógica de suscripciones
+}
+
+// Procesar webhook de preaprobaciones (para suscripciones recurrentes)
+async function processPreapprovalWebhook(preapprovalId: string, action: string) {
+  console.log(`Preapproval webhook received: ${preapprovalId}, action: ${action}`);
+  // TODO: Implementar lógica de preaprobaciones
+}
+
+// Manejar cuando un pago es aprobado
+async function handlePaymentApproved(payment: any) {
+  try {
+    console.log(`Processing approved payment for user ${payment.userId}, gym ${payment.gymId}`);
+    
+    // Aquí puedes agregar lógica adicional cuando un pago es aprobado:
+    // - Activar membresía del usuario
+    // - Enviar email de confirmación
+    // - Registrar en analytics
+    // - Notificar al gimnasio
+    
+    // Ejemplo: actualizar estado de membresía del usuario
+    // await activateUserMembership(payment.userId, payment.gymId);
+    
+  } catch (error) {
+    console.error('Error handling approved payment:', error);
+  }
+}
 
 // Obtener historial de pagos del usuario
 router.get('/my-payments', authenticateToken, async (req: AuthRequest, res) => {

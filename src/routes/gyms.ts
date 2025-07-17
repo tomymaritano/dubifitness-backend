@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { gyms } from '../db';
-import { db } from '../index';
-import { authenticateToken, requireRole, AuthRequest } from '../middleware/auth';
+import { gyms } from '../db/schema';
+import { db } from '../db';
+import { authenticateToken, requireGymOwner, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -76,8 +76,8 @@ router.put('/:gymId', authenticateToken, async (req: AuthRequest, res) => {
   }
 });
 
-// Listar todos los gimnasios (solo admins)
-router.get('/', authenticateToken, requireRole(['admin']), async (req: AuthRequest, res) => {
+// Listar todos los gimnasios (solo gym owners)
+router.get('/', authenticateToken, requireGymOwner, async (req: AuthRequest, res) => {
   try {
     const gymsList = await db.select().from(gyms);
     res.json({ gyms: gymsList });
@@ -88,7 +88,7 @@ router.get('/', authenticateToken, requireRole(['admin']), async (req: AuthReque
 });
 
 // Activar/desactivar gimnasio (solo admins)
-router.patch('/:gymId/status', authenticateToken, requireRole(['admin']), async (req: AuthRequest, res) => {
+router.patch('/:gymId/status', authenticateToken, requireGymOwner, async (req: AuthRequest, res) => {
   try {
     const gymId = parseInt(req.params.gymId);
     const { isActive } = req.body;

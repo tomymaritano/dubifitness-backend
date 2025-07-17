@@ -118,6 +118,7 @@ export const payments = sqliteTable('payments', {
   status: text('status', { enum: ['pending', 'approved', 'cancelled', 'refunded'] }).notNull().default('pending'),
   paymentMethod: text('payment_method').notNull().default('mercadopago'),
   mercadopagoId: text('mercadopago_id'),
+  paymentDate: integer('payment_date', { mode: 'timestamp' }),
   description: text('description'),
   metadata: text('metadata'), // JSON string para datos adicionales
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
@@ -146,6 +147,69 @@ export const gymSettings = sqliteTable('gym_settings', {
   gymId: integer('gym_id').notNull().references(() => gyms.id),
   key: text('key').notNull(),
   value: text('value').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`)
+});
+
+// Planes de suscripción disponibles
+export const subscriptionPlans = sqliteTable('subscription_plans', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(), // 'Basic', 'Pro', 'Premium'
+  code: text('code').notNull().unique(), // 'basic', 'pro', 'premium'
+  description: text('description'),
+  monthlyPrice: real('monthly_price').notNull(),
+  annualPrice: real('annual_price').notNull(),
+  maxGyms: integer('max_gyms').notNull().default(1),
+  maxUsersPerGym: integer('max_users_per_gym').notNull().default(50),
+  maxClassesPerMonth: integer('max_classes_per_month').notNull().default(100),
+  features: text('features'), // JSON string con lista de features
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`)
+});
+
+// Suscripciones activas de los dueños de gimnasios
+export const subscriptions = sqliteTable('subscriptions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ownerId: integer('owner_id').notNull().references(() => gymOwners.id),
+  planId: integer('plan_id').notNull().references(() => subscriptionPlans.id),
+  status: text('status', { 
+    enum: ['active', 'cancelled', 'expired', 'suspended', 'pending_payment'] 
+  }).notNull().default('pending_payment'),
+  billingCycle: text('billing_cycle', { enum: ['monthly', 'annual'] }).notNull().default('monthly'),
+  amount: real('amount').notNull(), // precio actual pagado
+  currency: text('currency').notNull().default('ARS'),
+  
+  // Fechas de la suscripción
+  startsAt: integer('starts_at', { mode: 'timestamp' }).notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  trialEndsAt: integer('trial_ends_at', { mode: 'timestamp' }),
+  
+  // MercadoPago integration
+  mercadopagoPreapprovalId: text('mercadopago_preapproval_id'),
+  
+  // Metadata
+  metadata: text('metadata'), // JSON string para datos adicionales
+  
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`)
+});
+
+// Historial de pagos de suscripciones
+export const subscriptionPayments = sqliteTable('subscription_payments', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  subscriptionId: integer('subscription_id').notNull().references(() => subscriptions.id),
+  ownerId: integer('owner_id').notNull().references(() => gymOwners.id),
+  amount: real('amount').notNull(),
+  currency: text('currency').notNull().default('ARS'),
+  status: text('status', { enum: ['pending', 'approved', 'cancelled', 'refunded'] }).notNull().default('pending'),
+  paymentMethod: text('payment_method').notNull().default('mercadopago'),
+  mercadopagoId: text('mercadopago_id'),
+  billingPeriodStart: integer('billing_period_start', { mode: 'timestamp' }).notNull(),
+  billingPeriodEnd: integer('billing_period_end', { mode: 'timestamp' }).notNull(),
+  paidAt: integer('paid_at', { mode: 'timestamp' }),
+  description: text('description'),
+  metadata: text('metadata'), // JSON string para datos adicionales
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`)
 });

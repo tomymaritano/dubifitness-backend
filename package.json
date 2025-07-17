@@ -8,35 +8,40 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "lint": "eslint src/**/*.ts",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "seed:plans": "tsx src/scripts/seed-subscription-plans.ts",
+    "db:push": "drizzle-kit push:sqlite",
+    "db:generate": "drizzle-kit generate:sqlite"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "@libsql/client": "^0.3.5",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "drizzle-orm": "^0.28.6",
+    "express": "^4.18.2",
     "helmet": "^7.0.0",
     "jsonwebtoken": "^9.0.2",
-    "bcryptjs": "^2.4.3",
-    "zod": "^3.22.4",
-    "@libsql/client": "^0.3.5",
-    "drizzle-orm": "^0.28.6",
     "mercadopago": "^1.5.17",
-    "dotenv": "^16.3.1",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.0"
+    "swagger-ui-express": "^5.0.0",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/express": "^4.17.17",
-    "@types/cors": "^2.8.13",
-    "@types/jsonwebtoken": "^9.0.2",
     "@types/bcryptjs": "^2.4.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cors": "^2.8.13",
+    "@types/express": "^4.17.17",
+    "@types/jsonwebtoken": "^9.0.2",
     "@types/node": "^20.5.0",
     "@types/swagger-jsdoc": "^6.0.1",
     "@types/swagger-ui-express": "^4.1.4",
-    "tsx": "^4.0.0",
-    "typescript": "^5.2.2",
+    "@typescript-eslint/eslint-plugin": "^6.4.0",
+    "@typescript-eslint/parser": "^6.4.0",
     "drizzle-kit": "^0.19.13",
     "eslint": "^8.47.0",
-    "@typescript-eslint/eslint-plugin": "^6.4.0",
-    "@typescript-eslint/parser": "^6.4.0"
+    "tsx": "^4.0.0",
+    "typescript": "^5.2.2"
   }
 }
