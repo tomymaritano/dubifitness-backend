@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { gymOwners, gyms, gymLocations, users, gymStaff } from '../db/schema';
 import { db } from '../db';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { getSecurityConfig } from '../config/environment';
 
 const router = Router();
 
@@ -116,7 +117,7 @@ router.post('/register-gym-owner', async (req, res) => {
     }
 
     // Hash de la contraseña
-    const passwordHash = await bcrypt.hash(data.password, 10);
+    const passwordHash = await bcrypt.hash(data.password, getSecurityConfig().bcryptRounds);
 
     // Crear dueño del gimnasio
     const newOwner = await db.insert(gymOwners).values({
@@ -151,8 +152,8 @@ router.post('/register-gym-owner', async (req, res) => {
         ownerId: newOwner[0].id,
         userType: 'gym_owner'
       },
-      process.env.JWT_SECRET || 'fallback-secret',
-      { expiresIn: '7d' }
+      getSecurityConfig().jwtSecret,
+      { expiresIn: getSecurityConfig().tokenExpiration }
     );
 
     res.status(201).json({
@@ -243,7 +244,7 @@ router.post('/register-user', async (req, res) => {
     }
 
     // Hash de la contraseña
-    const passwordHash = await bcrypt.hash(data.password, 10);
+    const passwordHash = await bcrypt.hash(data.password, getSecurityConfig().bcryptRounds);
 
     // Crear usuario
     const newUser = await db.insert(users).values({
@@ -263,8 +264,8 @@ router.post('/register-user', async (req, res) => {
         gymId: newUser[0].gymId,
         userType: 'user'
       },
-      process.env.JWT_SECRET || 'fallback-secret',
-      { expiresIn: '7d' }
+      getSecurityConfig().jwtSecret,
+      { expiresIn: getSecurityConfig().tokenExpiration }
     );
 
     res.status(201).json({
@@ -360,8 +361,8 @@ router.post('/login', async (req, res) => {
           ownerId: owner[0].id,
           userType: 'gym_owner'
         },
-        process.env.JWT_SECRET || 'fallback-secret',
-        { expiresIn: '7d' }
+        getSecurityConfig().jwtSecret,
+        { expiresIn: getSecurityConfig().tokenExpiration }
       );
 
       res.json({
@@ -408,8 +409,8 @@ router.post('/login', async (req, res) => {
           gymId: user[0].gymId,
           userType: 'user'
         },
-        process.env.JWT_SECRET || 'fallback-secret',
-        { expiresIn: '7d' }
+        getSecurityConfig().jwtSecret,
+        { expiresIn: getSecurityConfig().tokenExpiration }
       );
 
       res.json({

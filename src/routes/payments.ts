@@ -5,12 +5,13 @@ import { payments, subscriptionPayments, subscriptions } from '../db/schema';
 import { db } from '../db';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import mercadopago from 'mercadopago';
+import { getMercadoPagoConfig } from '../config/environment';
 
 const router = Router();
 
 // Configurar MercadoPago
 mercadopago.configure({
-  access_token: process.env.MERCADOPAGO_ACCESS_TOKEN || '',
+  access_token: getMercadoPagoConfig().accessToken,
 });
 
 // Schema de validación

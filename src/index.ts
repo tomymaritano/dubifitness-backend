@@ -1,10 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import swaggerUi from 'swagger-ui-express';
 import { createDatabase } from './db';
 import { specs } from './config/swagger';
+import { config, getCorsConfig, getDatabaseConfig, isDevelopment } from './config/environment';
 
 // Routers
 import authRouter from './routes/auth';
@@ -13,36 +13,36 @@ import classesRouter from './routes/classes';
 import bookingsRouter from './routes/bookings';
 import paymentsRouter from './routes/payments';
 import subscriptionsRouter from './routes/subscriptions';
-
-dotenv.config();
+import analyticsRouter from './routes/analytics';
+import locationsRouter from './routes/locations';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // Database connection
 export const db = createDatabase(
-  process.env.TURSO_DATABASE_URL || 'file:./dev.db',
-  process.env.TURSO_AUTH_TOKEN
+  getDatabaseConfig().url,
+  getDatabaseConfig().authToken
 );
 
 // Middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.FRONTEND_URLS?.split(',') || ['http://localhost:3001', 'http://localhost:19006'],
-  credentials: true
+app.use(helmet({
+  contentSecurityPolicy: isDevelopment() ? false : undefined
 }));
+app.use(cors(getCorsConfig()));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Swagger documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
-  customSiteTitle: 'DubiFitness API',
-  customfavIcon: '/favicon.ico',
-  customCss: '.swagger-ui .topbar { display: none }',
-  swaggerOptions: {
-    persistAuthorization: true,
-  }
-}));
+// Swagger documentation (only in development)
+if (isDevelopment()) {
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
+    customSiteTitle: 'DubiFitness API',
+    customfavIcon: '/favicon.ico',
+    customCss: '.swagger-ui .topbar { display: none }',
+    swaggerOptions: {
+      persistAuthorization: true,
+    }
+  }));
+}
 
 // Routes
 app.use('/api/auth', authRouter);
@@ -51,6 +51,8 @@ app.use('/api/classes', classesRouter);
 app.use('/api/bookings', bookingsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/locations', locationsRouter);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -61,7 +63,7 @@ app.get('/health', (req, res) => {
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Error:', err);
   res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+    error: config.NODE_ENV === 'production' ? 'Internal server error' : err.message
   });
 });
 
@@ -70,8 +72,9 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 DubiFitness API running on port ${PORT}`);
-  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+app.listen(config.PORT, () => {
+  console.log(`📊 Environment: ${config.NODE_ENV}`);
+  if (isDevelopment()) {
+    console.log(`📚 API Documentation: ${config.API_URL}/api-docs`);
+  }
 });

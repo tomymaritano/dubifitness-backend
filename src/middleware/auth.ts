@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { users, gymOwners } from '../db/schema';
 import { db } from '../db';
+import { getSecurityConfig } from '../config/environment';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -26,7 +27,7 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret') as any;
+    const decoded = jwt.verify(token, getSecurityConfig().jwtSecret) as any;
     
     if (decoded.userType === 'gym_owner') {
       // Autenticación para dueños de gimnasios
